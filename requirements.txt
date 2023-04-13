@@ -3,3 +3,6 @@ nomic
 pytest
 pyllamacpp
 pyyaml
+grpcio
+grpcio-tools
+futures
