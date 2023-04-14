@@ -3,8 +3,8 @@ syntax = "proto3";
 package chat;
 
 message Chat {
-    string id = 1;
-    string name = 2;
+    int32 id = 1;
+    string title = 2;
 }
 
 message ChatMessage {
@@ -18,6 +18,15 @@ message GetAllChatsRequest {
 
 message GetAllChatsResponse {
     repeated Chat chats = 1;
+}
+
+message GetChatRequest {
+    string id = 1;
+}
+
+message GetChatResponse {
+    string id = 1;
+    repeated ChatMessage message = 2;
 }
 
 message CreateChatRequest {
@@ -37,7 +46,7 @@ message DeleteChatResponse {}
 message SendChatMessageRequest {
     string chat_id = 1;
     string callback_url = 2;
-    ChatMessage message = 3;
+    string message = 3;
 }
 
 message SendChatMessageResponse {
@@ -47,6 +56,7 @@ message SendChatMessageResponse {
 service ChatService {
     rpc GetAllChats (GetAllChatsRequest) returns (GetAllChatsResponse) {}
     rpc CreateChat (CreateChatRequest) returns (CreateChatResponse) {}
+    rpc GetChat (GetChatRequest) returns (GetChatResponse) {}
     rpc DeleteChat (DeleteChatRequest) returns (DeleteChatResponse) {}
     rpc SendChatMessage (SendChatMessageRequest) returns (SendChatMessageResponse) {}
 }
