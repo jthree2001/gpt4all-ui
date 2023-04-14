@@ -49,10 +49,12 @@ class ChatbotInstance():
             #seed=self.config['seed'],
             n_threads=8
         )
+        # reply = self.chatbot_bindings.generate(self.full_message, n_predict=55)
         self.generating=False
         return reply
 
     def restore_discussion(self, id):
+        self.chatbot_bindings = self.create_chatbot()
         self.current_discussion = Discussion(id, self.db)
 
         messages = self.current_discussion.get_messages()
@@ -78,7 +80,11 @@ class ChatbotInstance():
         message_id = self.current_discussion.add_message(
             "user", "testing"
         )
-        self.current_message = str(message)
+        
+        self.current_message = message
+
+        print(message)
+        print(message.__class__)
 
         messages = self.current_discussion.get_messages()
         if not messages:
@@ -90,7 +96,7 @@ class ChatbotInstance():
             self.prompt_message = "\n".join(map(str, messages))
 
         self.prompt_message += "user: "+message
-        reply = self.generate_message
+        reply = self.generate_message()
 
         response_id = self.current_discussion.add_message(
             "GPT4All", reply

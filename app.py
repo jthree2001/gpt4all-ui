@@ -282,6 +282,8 @@ GPT4All:Welcome! I'm here to assist you with anything you need. What can I do fo
             else:
                 self.current_discussion = self.db.load_last_discussion()
 
+        print(request.json["message"])
+        print(request.json["message"].__class__)
         message_id = self.current_discussion.add_message(
             "user", request.json["message"]
         )
