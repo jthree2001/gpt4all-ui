@@ -19,4 +19,5 @@ RUN apt-get update \
 CMD ["python", "app.py", "--host", "0.0.0.0", "--port", "9600", "--db_path", "data/database.db"]
 
 # python gpt4all_grpc.py --db_path data/database.db
+# python app.py --host 0.0.0.0 --port 9600 --db_path data/database.db
 # python -m grpc_tools.protoc -I . --python_out=. --grpc_python_out=. protos/chat.proto

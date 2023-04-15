@@ -27,6 +27,9 @@ import gc
 app = Flask("GPT4All-WebUI", static_url_path="/static", static_folder="static")
 import time
 from config import load_config
+import threading
+import requests
+import json
 
 class ChatbotInstance():
     def new_text_callback(self, text: str):
@@ -60,11 +63,9 @@ class ChatbotInstance():
         messages = self.current_discussion.get_messages()
         if not messages:
             messages = ['']
-        print(messages)
-        if len(messages)>5:
-            self.prompt_message = "\n".join(map(str, messages[-5:]))
-        else:
-            self.prompt_message = "\n".join(map(str, messages))
+        self.prompt_message = ""
+        for i in range(min(len(messages), 3)):
+            self.prompt_message += "{}: {} \n".format(messages[i]['sender'], messages[i]['content'])
         
     def prepare_a_new_chatbot(self):
         # Create chatbot
@@ -76,32 +77,51 @@ class ChatbotInstance():
     def id(self):
         return self.current_discussion.discussion_id
 
-    def send_message(self, message):
+    def send_message(self, message, url):
         message_id = self.current_discussion.add_message(
             "user", "testing"
         )
-        
-        self.current_message = message
+    
+        t = threading.Thread(target= self.generate_in_thread, args=(self.id(), self.db, self.config, url, message))
+        print("starting thread")
+        return str(t.start())
 
-        print(message)
-        print(message.__class__)
+    @staticmethod
+    def generate_in_thread(id, db, config, call_back_url, message):
+        chat = ChatbotInstance.find_and_restore(id, db, config)
 
-        messages = self.current_discussion.get_messages()
+        messages = chat.current_discussion.get_messages()
         if not messages:
             messages = ['']
 
-        if len(messages)>5:
-            self.prompt_message = "\n".join(map(str, messages[-5]))
-        else:
-            self.prompt_message = "\n".join(map(str, messages))
+        chat.prompt_message = ""
+        for i in range(min(len(messages), 4)):
+            chat.prompt_message += "\n {}: {} \n".format(messages[i]['sender'], messages[i]['content'])
 
-        self.prompt_message += "user: "+message
-        reply = self.generate_message()
+        chat.prompt_message += "user: "+message
+        chat.current_message = "user: "+message
 
-        response_id = self.current_discussion.add_message(
-            "GPT4All", reply
+        reply = chat.generate_message()
+        new_data = reply.split(message)[-1]
+        print(new_data)
+        print("=========================")
+        real_reply = new_data.split("### Human")[0]
+        print(real_reply)
+        response_id = chat.current_discussion.add_message(
+            "GPT4All", real_reply
         )
-        return reply
+        data = {
+            "message": real_reply.split("### Assistant:")[-1]
+        }
+
+        json_data = json.dumps(data)
+
+        headers = {"Content-Type": "application/json"}
+        response = requests.post(call_back_url, data=json_data, headers=headers)
+        if response.status_code == 200:
+            print("Message sent successfully!")
+        else:
+            print("Error occurred: ", response.text)
 
     def title(self):
         # TODO(Michael): figure out how to get the title out of the database...
@@ -170,11 +190,9 @@ class Gpt4allGrpc(chat_pb2_grpc.ChatServiceServicer):
         return chats
 
     def SendChatMessage(self, request, context):
-        print(request)
-        chat = ChatbotInstance.find_and_restore(request.chat_id, self.db, self.config)
-        reply = chat.send_message(request.message)
-        print(reply)
-        return chat_pb2.SendChatMessageResponse(message=message)
+        chat = ChatbotInstance.find(request.chat_id, self.db, self.config)
+        reply = chat.send_message(request.message, request.callback_url)
+        return chat_pb2.SendChatMessageResponse(message=reply)
 
     def GetAllChats(self, request, context):
         discussions = self.get_all_discussions()
