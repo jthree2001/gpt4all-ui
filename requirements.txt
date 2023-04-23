@@ -6,3 +6,4 @@ pyyaml
 grpcio
 grpcio-tools
 futures
+sqlalchemy

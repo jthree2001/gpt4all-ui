@@ -79,7 +79,7 @@ class ChatbotInstance():
 
     def send_message(self, message, url):
         message_id = self.current_discussion.add_message(
-            "user", "testing"
+            "user", "### Human: "+message
         )
     
         t = threading.Thread(target= self.generate_in_thread, args=(self.id(), self.db, self.config, url, message))
@@ -134,8 +134,8 @@ class ChatbotInstance():
             seed=self.config['seed'],
             )
     def condition_chatbot(self, conditionning_message = """
-Instruction: Act as GPT4All. A kind and helpful AI bot built to help users solve problems.
-GPT4All:Welcome! I'm here to assist you with anything you need. What can I do for you today?"""
+Instruction: Act as Deka. A kind and helpful AI bot built to help users solve problems.
+Deka: Welcome! I'm here to assist you with anything you need. What can I do for you today?"""
                           ):
         if self.current_discussion is None:
             if self.db.does_last_discussion_have_messages():
