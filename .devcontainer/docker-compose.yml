@@ -5,8 +5,8 @@ services:
     container_name: dev-container
     build:
       context: ..
-      # dockerfile: Dockerfile
-      dockerfile: /home/mlawson/Workspace/gpt_workspace/gpt4all-ui/.devcontainer/Dockerfile
+      dockerfile: .devcontainer/Dockerfile
+      # dockerfile: /home/mlawson/Workspace/gpt_workspace/gpt4all-ui/.devcontainer/Dockerfile
     volumes:
       - ..:/workspace:cached
     # Overrides default command so things don't shut down after the process ends.
