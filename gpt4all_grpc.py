@@ -11,30 +11,19 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import sys
 from db import DiscussionsDB, Discussion
-from flask import (
-    Flask,
-    Response,
-    jsonify,
-    render_template,
-    request,
-    stream_with_context,
-    send_from_directory
-)
-from pyllamacpp.model import Model
+from fastLLaMa import Model
 from queue import Queue
 from pathlib import Path
 import gc
-app = Flask("GPT4All-WebUI", static_url_path="/static", static_folder="static")
 import time
 from config import load_config
 import threading
 import requests
 import json
+from redis import Redis
+from rq import Queue
 
 class ChatbotInstance():
-    def new_text_callback(self, text: str):
-        print(text, end="")
-        sys.stdout.flush()
 
     def generate_message(self):
         self.generating=True
@@ -60,19 +49,26 @@ class ChatbotInstance():
         self.chatbot_bindings = self.create_chatbot()
         self.current_discussion = Discussion(id, self.db)
 
+        file_name = "session-"+ str(self.id())
+        self.chatbot_bindings.load_state("models/"+file_name+".bin")
+
         messages = self.current_discussion.get_messages()
         if not messages:
             messages = ['']
-        self.prompt_message = ""
-        for i in range(min(len(messages), 3)):
-            self.prompt_message += "{}: {} \n".format(messages[i]['sender'], messages[i]['content'])
+            
         
     def prepare_a_new_chatbot(self):
         # Create chatbot
-        self.chatbot_bindings = self.create_chatbot()
+        # self.chatbot_bindings = self.create_chatbot()
         # Chatbot conditionning
-        self.condition_chatbot()
-        return self.chatbot_bindings
+        self.create_discussion_db()
+        message_id = self.current_discussion.add_message(
+            "conditionner", "Beginning of Discussion", DiscussionsDB.MSG_TYPE_CONDITIONNING,0
+        )
+        # q = Queue(connection=Redis(host='192.168.254.85', port=6379, db=0))
+        # from gpt4all_grpc import ChatbotInstance
+        # enqueue_message = q.enqueue(ChatbotInstance.condition_in_worker, self.id(), self.db, self.config)
+        # print("Enqueued Conditioning")
 
     def id(self):
         return self.current_discussion.discussion_id
@@ -81,10 +77,21 @@ class ChatbotInstance():
         message_id = self.current_discussion.add_message(
             "user", "testing"
         )
-    
-        t = threading.Thread(target= self.generate_in_thread, args=(self.id(), self.db, self.config, url, message))
-        print("starting thread")
-        return str(t.start())
+        # self.generate_in_thread(self.id(), self.db, self.config, url, message)
+        # t = threading.Thread(target= self.generate_in_thread, args=(self.id(), self.db, self.config, url, message))
+        # print("starting thread")
+        # return str(t.start())
+        q = Queue(connection=Redis(host='192.168.254.85', port=6379, db=0))
+        print("Enqueued Job")
+        from gpt4all_grpc import ChatbotInstance
+        enqueue_message = q.enqueue(ChatbotInstance.generate_in_thread, self.id(), self.db, self.config, url, message)
+        print(enqueue_message)
+        return enqueue_message
+
+    @staticmethod
+    def condition_in_worker(id, db, config):
+        chat = ChatbotInstance.find_and_restore(id, db, config)
+        # chat.condition_chatbot()
 
     @staticmethod
     def generate_in_thread(id, db, config, call_back_url, message):
@@ -101,27 +108,65 @@ class ChatbotInstance():
         chat.prompt_message += "user: "+message
         chat.current_message = "user: "+message
 
-        reply = chat.generate_message()
+        user_input = "\n\n### Instruction:\n\n" + message + "\n\n### Response:\n\n"
+        gc.collect()
+        res = chat.chatbot_bindings.ingest(user_input)
+        print("--------------------")
+        print(res)
+        reply = ""
+        flush = ""
+
+        def send_to_callback(message):
+            data = {
+            "message": message
+            }
+
+            json_data = json.dumps(data)
+
+            headers = {"Content-Type": "application/json"}
+            nonlocal call_back_url
+            response = requests.post(call_back_url, data=json_data, headers=headers)
+            if response.status_code == 200:
+                print("Message sent successfully!")
+            else:
+                print("Error occurred: ", response.text)
+        def stream_token(x: str) -> None:
+            """
+            This function is called by the llama library to stream tokens
+            """
+            nonlocal reply
+            nonlocal flush
+            flush = flush + x
+            print(x, end='', flush=True)
+            print(flush)
+            if '\n' in flush:
+                send_to_callback(flush)
+                reply = reply + flush
+                flush = ""
+        
+        generation_done = chat.chatbot_bindings.generate(
+            num_tokens=500, 
+            top_p=0.95, #top p sampling (Optional)
+            temp=0.8, #temperature (Optional)
+            repeat_penalty=1.0, #repetition penalty (Optional)
+            streaming_fn=stream_token, #streaming function
+            stop_words=["###"] #stop generation when this word is encountered (Optional)
+            )
+
+        print("=========================1")
+        print(reply)
+        print(generation_done)
+        print("=========================2")
         new_data = reply.split(message)[-1]
         print(new_data)
-        print("=========================")
+        print("=========================3")
         real_reply = new_data.split("### Human")[0]
         print(real_reply)
         response_id = chat.current_discussion.add_message(
             "GPT4All", real_reply
         )
-        data = {
-            "message": real_reply.split("### Assistant:")[-1]
-        }
 
-        json_data = json.dumps(data)
-
-        headers = {"Content-Type": "application/json"}
-        response = requests.post(call_back_url, data=json_data, headers=headers)
-        if response.status_code == 200:
-            print("Message sent successfully!")
-        else:
-            print("Error occurred: ", response.text)
+        chat.save()
 
     def title(self):
         # TODO(Michael): figure out how to get the title out of the database...
@@ -129,23 +174,30 @@ class ChatbotInstance():
 
     def create_chatbot(self):
         return Model(
-            ggml_model=f"./models/{self.config['model']}", 
-            n_ctx=self.config['ctx_size'], 
-            seed=self.config['seed'],
-            )
-    def condition_chatbot(self, conditionning_message = """
-Instruction: Act as GPT4All. A kind and helpful AI bot built to help users solve problems.
-GPT4All:Welcome! I'm here to assist you with anything you need. What can I do for you today?"""
-                          ):
+            path=f"./models/{self.config['model']}", #path to model
+            num_threads=self.config['threads'], #number of threads to use
+            n_ctx=self.config['ctx_size'], #context size of model
+        )
+    def create_discussion_db(self):
         if self.current_discussion is None:
             if self.db.does_last_discussion_have_messages():
                 self.current_discussion = self.db.create_discussion()
             else:
                 self.current_discussion = self.db.load_last_discussion()
-        
+
+    def condition_chatbot(self, conditionning_message = """
+Instruction: Act as Deka. A kind and helpful AI bot built to help users solve problems.
+Deka: Welcome! I'm here to assist you with anything you need. What can I do for you today?"""
+                          ):
+        self.create_discussion_db()
         message_id = self.current_discussion.add_message(
             "conditionner", conditionning_message, DiscussionsDB.MSG_TYPE_CONDITIONNING,0
         )
+        self.chatbot_bindings = self.create_chatbot()
+        response = self.chatbot_bindings.ingest(conditionning_message, is_system_prompt=True)
+        file_name = "session-"+ str(self.id())
+        self.chatbot_bindings.save_state("models/"+file_name+".bin")
+
     def __init__(self, db, config:dict) -> None:
         # workaround for non interactive mode
         self.prompt_message = ""
@@ -166,6 +218,10 @@ GPT4All:Welcome! I'm here to assist you with anything you need. What can I do fo
         chat = ChatbotInstance(db, config)
         chat.current_discussion = Discussion(id, db)
         return chat
+
+    def save(self):
+        file_name = "session-"+ str(self.id())
+        self.chatbot_bindings.save_state("models/"+file_name+".bin")
 
 
 class Gpt4allGrpc(chat_pb2_grpc.ChatServiceServicer):

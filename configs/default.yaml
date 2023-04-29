@@ -11,3 +11,4 @@ debug: false
 host: "localhost"
 port: 9600
 db_path: "database.db"
+threads: 8

@@ -6,3 +6,12 @@ pyyaml
 grpcio
 grpcio-tools
 futures
+numpy==1.24.2
+sentencepiece==0.1.97
+torch==2.0.0
+py-cpuinfo==9.0.0
+inquirer==3.1.3
+git+https://github.com/huggingface/transformers.git
+git+https://github.com/huggingface/peft.git
+git+https://github.com/PotatoSpudowski/fastLLaMa.git@feature/pip
+rq
